@@ -4,6 +4,9 @@
  * and the local system, as well as a number of useful command
  * wrappers.
  *
+ * Multidrop integration added 5/2016
+ * Kevin Chen, Spectrum Comm. Inc.
+ *
  * Copyright © Benjamin Pannell 2014
  */
 
@@ -24,11 +27,18 @@ function Isotope(device) {
 	this.lastWrite = 0;
 	this.writeInterval = null;
 
+	// Specifies which Teensy should process a fired command
+	this.target = 0x0;
+
+
+	// Note: with the Teensy 2.0 + BBB, the emitted data comes as S8N1
+	// You will have to toggle the UART to match or use a separate UART pair dedicated to read.
 	if(typeof device == "string")
 		this.uart = new SerialPort(device, {
 			baudrate: 115200,
 			parity: 'even'
 		});
+
 	else this.uart = device;
 
 	this.keyboard = new Keyboard(this);
@@ -65,6 +75,10 @@ util.inherits(Isotope, EventEmitter);
 Isotope.keyboard = require('./keycodes/keyboard');
 Isotope.mouse = require('./keycodes/mouse');
 
+Isotope.prototype.setTarget = function(target) {
+	this.target = target << 5;
+}
+
 Isotope.prototype.send = function(packet) {
 	if(packet) this.buffer.push(packet);
 	if(!this.buffer.length) return;
@@ -82,11 +96,12 @@ Isotope.prototype.send = function(packet) {
 
 Isotope.prototype.mouseRaw = function(buttons, deltaX, deltaY, deltaScroll) {
 	var packet = zeros(5), length = 4;
-	packet[0] = 0x40;
-	packet[1] = 0xff & (buttons || 0);
-	packet[2] = 0xff & (deltaX || 0);
-	packet[3] = 0xff & (deltaY || 0);
-	packet[4] = 0xff & (deltaScroll || 0);
+	packet[1] = 0x2;
+	packet[0] = this.target;
+	packet[2] = 0xff & (buttons || 0);
+	packet[3] = 0xff & (deltaX || 0);
+	packet[4] = 0xff & (deltaY || 0);
+	packet[5] = 0xff & (deltaScroll || 0);
 
 	if(!deltaScroll) {
 		length--;
@@ -105,15 +120,16 @@ Isotope.prototype.mouseRaw = function(buttons, deltaX, deltaY, deltaScroll) {
 
 Isotope.prototype.keyboardRaw = function(modifiers, keys) {
 	var packet = zeros(8), length = 0;
-	packet[0] = 0x20;
+	packet[1] = 0x1;
+	packet[0] = this.target;
 	if(!modifiers && (!keys || keys.length == 0)) return this.send(packet.slice(0, 1));
 
 	if(!Array.isArray(keys)) throw new Error("Keys should be an array");
 	if(keys.length > 6) throw new Error("A maximum of 6 keys can be pressed at any time.");
 
-	packet[1] = modifiers & 0xff;
+	packet[2] = modifiers & 0xff;
 	for(var i = 0; i < keys.length; i++)
-		packet[i + 2] = 0xff & (keys[i] || 0);
+		packet[i + 3] = 0xff & (keys[i] || 0);
 
 	packet[0] |= keys.length + 1;
 	this.send(packet.slice(0, 2 + keys.length));
